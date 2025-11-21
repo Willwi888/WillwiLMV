@@ -39,7 +39,8 @@ export const exportVideo = async (
         onProgress('步驟 1/4: 載入轉檔核心...', 0);
         const ffmpegInstance = await loadFFmpeg();
         
-        const FPS = 25; // Lower FPS for better stability
+        // Increased FPS to 30 for smoother animation
+        const FPS = 30; 
         const totalFrames = Math.floor(duration * FPS);
         
         ffmpegInstance.setProgress(({ ratio }: { ratio: number }) => {
@@ -93,9 +94,11 @@ export const exportVideo = async (
             '-i', 'frame-%05d.jpg',
             '-i', audioFileName,
             '-c:v', 'libx264',
+            '-preset', 'veryfast', // Optimize encoding speed
+            '-crf', '28',          // Optimize file size (higher is smaller, default is 23)
             '-pix_fmt', 'yuv420p',
-            '-c:a', 'aac', // Use a standard audio codec
-            '-b:a', '192k', // Set audio bitrate
+            '-c:a', 'aac', 
+            '-b:a', '128k',        // Reduce audio bitrate to save space
             '-map', '0:v:0',
             '-map', '1:a:0',
             '-shortest', // Finish encoding when the shortest input stream ends

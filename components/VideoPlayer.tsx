@@ -205,7 +205,8 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     return (
         <>
             {activeLyric ? (
-                <div className="animate-lyric-fade-in" style={{ fontSize: `${fontSize}rem`, lineHeight: 1.2, fontWeight: 'bold' }}>
+                // Disable animation during export to prevent "fast forward" glitches due to non-linear rendering
+                <div className={!isExporting.active ? "animate-lyric-fade-in" : ""} style={{ fontSize: `${fontSize}rem`, lineHeight: 1.2, fontWeight: 'bold' }}>
                     <KaraokeLyric
                         text={activeLyric.text}
                         startTime={activeLyric.startTime}
