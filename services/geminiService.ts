@@ -182,6 +182,51 @@ ${lyrics}
 
 
 /**
+ * Generates a creative, mood-based video prompt by analyzing lyrics.
+ * @param lyrics The lyrics of the song.
+ * @param songTitle The song title.
+ * @param artistName The artist name.
+ * @param userVision The user's basic idea/vision.
+ */
+export const generateCreativeVideoPrompt = async (
+    lyrics: string,
+    songTitle: string,
+    artistName: string,
+    userVision: string
+): Promise<string> => {
+    try {
+        const ai = getAiClient();
+        const prompt = `Act as an expert music video director. I need a prompt for a high-quality video generation model (like Veo).
+        
+        Analyze the song '${songTitle}' by '${artistName}'.
+        Lyrics: "${lyrics.substring(0, 500)}..." (snippet)
+        
+        The user's vision is: "${userVision}".
+
+        Combine the user's vision with the mood, tempo, and emotion derived from the lyrics to create a detailed, artistic video generation prompt.
+        
+        Requirements for the prompt:
+        1. Visuals: Describe the lighting, colors, and scene details.
+        2. Movement: Describe the camera movement (e.g., slow pan, fast cut, zooming, rhythmic pulsing).
+        3. Atmosphere: Ensure it captures the "vibe" (e.g., melancholic, energetic, dreamlike).
+        4. Technical: Use keywords like "cinematic", "photorealistic", "4k", "high quality".
+        5. IMPORTANT: Include phrases implying "beat sync" or rhythmic motion if the song seems energetic, or "smooth flow" if it is slow.
+        
+        Output ONLY the final English prompt string.`;
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
+        
+        return response.text;
+    } catch (error) {
+        console.error("Error generating creative prompt:", error);
+        return userVision; // Fallback to user's raw input
+    }
+};
+
+/**
  * Generates a video from a base image and a prompt.
  * @param base64ImageData The base64 data URL of the image to use.
  * @param prompt A prompt to guide the video generation.

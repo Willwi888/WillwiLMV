@@ -2,11 +2,18 @@
 declare const FFmpeg: any;
 declare const html2canvas: any;
 
-const { createFFmpeg, fetchFile } = FFmpeg;
 let ffmpeg: any;
 
 async function loadFFmpeg() {
     if (ffmpeg && ffmpeg.isLoaded()) return ffmpeg;
+    
+    // Access global FFmpeg lazily inside the function
+    if (typeof FFmpeg === 'undefined') {
+        throw new Error("FFmpeg library not loaded. Please check your internet connection.");
+    }
+    
+    const { createFFmpeg } = FFmpeg;
+    
     ffmpeg = createFFmpeg({
         log: true,
         // Using version 0.10.1 single-threaded core to match the loader in index.html.
@@ -38,8 +45,11 @@ export const exportVideo = async (
 
     try {
         onProgress('步驟 1/4: 載入轉檔核心...', 0);
-        const ffmpegInstance = await loadFFmpeg();
         
+        // This will now throw a clear error if FFmpeg global is missing, rather than crashing on module load
+        const ffmpegInstance = await loadFFmpeg();
+        const { fetchFile } = FFmpeg; 
+
         // Increased FPS to 30 for smoother animation
         const FPS = 30; 
         const totalFrames = Math.floor(duration * FPS);

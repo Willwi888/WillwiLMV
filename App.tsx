@@ -7,10 +7,13 @@ import UploadIcon from './components/icons/UploadIcon';
 import PencilIcon from './components/icons/PencilIcon';
 import SparklesIcon from './components/icons/SparklesIcon';
 import VideoCameraIcon from './components/icons/VideoCameraIcon';
+import FilmIcon from './components/icons/FilmIcon';
+import SaveIcon from './components/icons/SaveIcon';
+import FolderOpenIcon from './components/icons/FolderOpenIcon';
 import { TimedLyric } from './types';
 import Loader from './components/Loader';
 import { parseSrt, fileToBase64 } from './utils';
-import { generateImagesForLyrics, editImage, generateSrtFromLyrics, generateVideoFromImage } from './services/geminiService';
+import { generateImagesForLyrics, editImage, generateSrtFromLyrics, generateVideoFromImage, generateCreativeVideoPrompt } from './services/geminiService';
 import { completionMessages, inspirationalMessages, getRandomMessage } from './messages';
 import CloudArrowUpIcon from './components/icons/CloudArrowUpIcon';
 
@@ -18,6 +21,17 @@ import CloudArrowUpIcon from './components/icons/CloudArrowUpIcon';
 type AppState = 'WELCOME' | 'FORM' | 'TIMING' | 'PREVIEW';
 
 const DEFAULT_BG_IMAGE = 'https://storage.googleapis.com/aistudio-hosting/workspace-template-assets/lyric-video-maker/default_bg.jpg';
+
+interface ProjectFile {
+    version: number;
+    songTitle: string;
+    artistName: string;
+    lyricsText: string;
+    timedLyrics: TimedLyric[];
+    timedLyricsFromSrt: TimedLyric[] | null;
+    backgroundImages: string[]; // Base64 strings
+    audioCloudUrl: string;
+}
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>('WELCOME');
@@ -33,7 +47,7 @@ const App: React.FC = () => {
   const [timedLyricsFromSrt, setTimedLyricsFromSrt] = useState<TimedLyric[] | null>(null);
   const [isLoading, setIsLoading] = useState<{ active: boolean; message: string }>({ active: false, message: '' });
   const [isAiUnlocked, setIsAiUnlocked] = useState(false);
-  const AI_PASSWORD = '8888';
+  const AI_PASSWORD = '2580';
   const audioDurationRef = useRef<number>(0);
   const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
   const aiMenuRef = useRef<HTMLDivElement>(null);
@@ -173,6 +187,94 @@ const App: React.FC = () => {
         }
     };
 
+    const handleSaveProject = async () => {
+        setIsLoading({ active: true, message: '正在打包您的麵攤...' });
+        try {
+            // Convert all images to Base64
+            const serializedImages = await Promise.all(backgroundImages.map(async (img) => {
+                if (typeof img === 'string') return img;
+                return await fileToBase64(img);
+            }));
+
+            const projectData: ProjectFile = {
+                version: 1,
+                songTitle,
+                artistName,
+                lyricsText,
+                timedLyrics,
+                timedLyricsFromSrt,
+                backgroundImages: serializedImages,
+                audioCloudUrl, // We can only save the URL, not the file object
+            };
+
+            const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${songTitle || 'untitled'}_project.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            
+            alert('專案已儲存！請注意：由於瀏覽器限制，我們無法儲存您的「本機音訊檔」。\n下次載入專案時，請記得重新上傳音訊檔案。');
+
+        } catch (error) {
+            console.error("Save project failed:", error);
+            alert('儲存專案失敗。');
+        } finally {
+            setIsLoading({ active: false, message: '' });
+        }
+    };
+
+    const handleLoadProject = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        
+        setIsLoading({ active: true, message: '正在重新開張...' });
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            try {
+                const json = event.target?.result as string;
+                const projectData: ProjectFile = JSON.parse(json);
+
+                if (!projectData.version) {
+                    throw new Error("Invalid project file");
+                }
+
+                setSongTitle(projectData.songTitle || '');
+                setArtistName(projectData.artistName || '');
+                setLyricsText(projectData.lyricsText || '');
+                setTimedLyrics(projectData.timedLyrics || []);
+                setTimedLyricsFromSrt(projectData.timedLyricsFromSrt || null);
+                
+                if (projectData.backgroundImages && Array.isArray(projectData.backgroundImages)) {
+                    setBackgroundImages(projectData.backgroundImages);
+                }
+
+                // Handle Audio
+                if (projectData.audioCloudUrl) {
+                    setAudioCloudUrl(projectData.audioCloudUrl);
+                    // Try to re-fetch if it was a cloud file
+                    await fetchAudioFromUrl(projectData.audioCloudUrl);
+                } else {
+                    setAudioFile(null);
+                    setFetchedAudioFile(null);
+                    setAudioCloudUrl('');
+                    alert('專案載入成功！\n\n提醒：請重新上傳您的音訊檔案以繼續製作。');
+                }
+
+            } catch (error) {
+                console.error("Load project failed:", error);
+                alert('載入專案失敗，檔案可能已損毀或格式不符。');
+            } finally {
+                setIsLoading({ active: false, message: '' });
+                e.target.value = ''; // Reset input
+            }
+        };
+        reader.readAsText(file);
+    };
+
 
   const runAiImageGeneration = async () => {
     if (!lyricsText || !songTitle || !artistName) {
@@ -266,6 +368,7 @@ const App: React.FC = () => {
             base64Image = await fileToBase64(baseImage);
         }
         
+        // Basic prompt for standard generation
         const prompt = `Create a dynamic, looping video background inspired by this image, suitable for the song '${songTitle}' by '${artistName}'. Make it visually interesting but not distracting.`;
         
         const generatedVideoUrl = await generateVideoFromImage(base64Image, prompt, (message) => {
@@ -286,6 +389,65 @@ const App: React.FC = () => {
             setIsKeySelected(true);
         } else {
             alert(`AI 影片生成失敗: ${error instanceof Error ? error.message : "未知錯誤"}`);
+        }
+    } finally {
+        setIsLoading({ active: false, message: '' });
+    }
+  };
+
+  const runAiMusicVideoDirector = async () => {
+    if (backgroundImages.length === 0) {
+        alert('請先上傳至少一張圖片作為基礎，讓導演有個參考畫面。');
+        return;
+    }
+    if (!lyricsText || !songTitle) {
+        alert('請先填寫歌曲資訊與歌詞，導演需要理解音樂才能創作。');
+        return;
+    }
+    
+    if (!isKeySelected) {
+        alert("MV 導演模式需要強大的算力，請選擇 API 金鑰以啟用。");
+        await window.aistudio.openSelectKey();
+        setIsKeySelected(true); 
+        return; 
+    }
+
+    const userVision = prompt("【AI MV 導演模式】\n請描述您對這部 MV 的想像或視覺願景（例如：賽博龐克城市、寧靜的森林雨天、復古錄影帶風格）：", "配合歌詞情緒的電影感畫面");
+    if (!userVision) return;
+
+    setIsLoading({ active: true, message: '導演正在研讀歌詞與聽歌...' });
+    try {
+        const baseImage = backgroundImages[0];
+        let base64Image: string;
+        if (typeof baseImage === 'string') {
+            base64Image = baseImage;
+        } else {
+            base64Image = await fileToBase64(baseImage);
+        }
+        
+        // 1. Analyze lyrics to create a detailed prompt
+        setIsLoading({ active: true, message: '導演正在撰寫分鏡腳本 (分析情緒與節奏)...' });
+        const creativePrompt = await generateCreativeVideoPrompt(lyricsText, songTitle, artistName, userVision);
+        console.log("Generated Creative Prompt:", creativePrompt);
+
+        // 2. Generate video with the creative prompt
+        const generatedVideoUrl = await generateVideoFromImage(base64Image, creativePrompt, (message) => {
+            setIsLoading({ active: true, message: `正在開拍 MV 場景... ${message}` });
+        });
+        
+        setVideoUrl(generatedVideoUrl);
+        setBackgroundImages([baseImage]); 
+        alert(`AI MV 導演創作完成！\n這部影片融合了您的視野與歌詞的情緒。\n\n${getRandomMessage(inspirationalMessages)}`);
+
+    } catch (error) {
+        console.error("AI MV Director failed:", error);
+        if (error instanceof Error && error.message.includes("API Key not found")) {
+            alert('API Key 似乎已失效，請重新選擇。');
+            setIsKeySelected(false);
+            await window.aistudio.openSelectKey();
+            setIsKeySelected(true);
+        } else {
+            alert(`MV 製作失敗: ${error instanceof Error ? error.message : "未知錯誤"}`);
         }
     } finally {
         setIsLoading({ active: false, message: '' });
@@ -320,7 +482,10 @@ const App: React.FC = () => {
             >
                 <div className="transform transition-transform hover:scale-105 duration-500">
                     <h1 className="text-4xl sm:text-5xl font-extrabold text-[#a6a6a6] tracking-widest font-serif">文字泡麵</h1>
-                    <h2 className="text-xl sm:text-2xl font-light text-gray-300 mt-4 tracking-[0.1em]">純手打の溫度</h2>
+                    <div className="flex flex-col items-center gap-1 mt-4">
+                        <h2 className="text-xl sm:text-2xl font-light text-gray-300 tracking-[0.1em]">純手打の溫度</h2>
+                        <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded-full border border-gray-700">v2.0 導演版</span>
+                    </div>
                 </div>
                 <p className="text-gray-400 mt-12 sm:mt-20 text-md">用你的故事，煮一碗好麵。</p>
                 <p className="text-gray-500 mt-4 text-md animate-pulse">世界太快，但你還願意慢慢煮。</p>
@@ -356,14 +521,29 @@ const App: React.FC = () => {
           <div className="w-full max-w-2xl p-4 sm:p-8 space-y-6 bg-gray-800/50 backdrop-blur-sm rounded-xl shadow-2xl border border-gray-700">
              {isLoading.active && <Loader message={isLoading.message} />}
              <audio src={audioUrl} onLoadedMetadata={handleAudioMetadata} className="hidden" crossOrigin="anonymous" />
-            <div className="text-center">
-              <h2 className="mt-4 text-3xl font-bold tracking-tight text-white">
-                泡麵歌詞器 — 音樂調理說明
-              </h2>
-              <p className="mt-2 text-sm text-gray-400">
+             
+             {/* Project Actions Bar */}
+             <div className="flex justify-between items-center pb-4 border-b border-gray-700 flex-wrap gap-2">
+                <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+                    音樂調理說明
+                </h2>
+                <div className="flex gap-2">
+                    <label className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded-md cursor-pointer transition-colors border border-gray-600 shadow-sm">
+                        <FolderOpenIcon className="w-4 h-4" />
+                        <span>載入進度</span>
+                        <input type="file" accept=".json" onChange={handleLoadProject} className="hidden" />
+                    </label>
+                    <button onClick={handleSaveProject} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-900 bg-[#a6a6a6] hover:bg-[#999999] rounded-md transition-colors border border-gray-500 shadow-sm">
+                        <SaveIcon className="w-4 h-4" />
+                        <span>儲存進度</span>
+                    </button>
+                </div>
+             </div>
+             
+             <p className="mt-2 text-sm text-gray-400 text-center">
                 上傳您的作品與歌詞，開始烹煮專屬的動態歌詞 MV。<br/>（提醒：泡麵煮太久會變抒情歌）
               </p>
-            </div>
+
             <form onSubmit={handleStart} className="space-y-6">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -422,36 +602,43 @@ const App: React.FC = () => {
               <div>
                 <div className="flex justify-between items-center mb-2 flex-wrap gap-2">
                   <label className="block text-sm font-medium text-gray-300">配料加成（專輯／背景）</label>
-                    <div className="relative" ref={aiMenuRef}>
-                        <button 
-                            type="button" 
-                            onClick={() => isAiUnlocked ? setIsAiMenuOpen(p => !p) : handleAiRequest(() => setIsAiMenuOpen(true))} 
-                            className="flex items-center gap-2 px-3 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors text-sm"
-                        >
-                            <SparklesIcon className="w-4 h-4" />
-                            <span>天選之桶</span>
-                        </button>
-                        {isAiMenuOpen && isAiUnlocked && (
-                            <div className="absolute right-0 top-full mt-2 w-48 bg-gray-700 rounded-md shadow-lg z-20 border border-gray-600">
-                                <ul className="py-1">
-                                    <li>
-                                        <button onClick={() => { handleAiRequest(runAiLyricTiming); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors">
-                                            <SparklesIcon className="w-4 h-4 text-purple-400" /> AI 自動抓軌
-                                        </button>
-                                    </li>
-                                    <li>
-                                        <button onClick={() => { handleAiRequest(runAiImageGeneration); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors">
-                                            <ImageIcon className="w-4 h-4 text-green-400" /> AI 生成圖片
-                                        </button>
-                                    </li>
-                                    <li>
-                                        <button onClick={() => { handleAiRequest(runAiVideoGeneration); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors">
-                                            <VideoCameraIcon className="w-4 h-4 text-blue-400" /> AI 生成影片
-                                        </button>
-                                    </li>
-                                </ul>
-                            </div>
-                        )}
+                  <div className="flex gap-2">
+                        <div className="relative" ref={aiMenuRef}>
+                            <button 
+                                type="button" 
+                                onClick={() => isAiUnlocked ? setIsAiMenuOpen(p => !p) : handleAiRequest(() => setIsAiMenuOpen(true))} 
+                                className="flex items-center gap-2 px-3 py-1 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors text-sm border border-gray-600"
+                            >
+                                <SparklesIcon className="w-4 h-4" />
+                                <span>天選之桶</span>
+                            </button>
+                            {isAiMenuOpen && isAiUnlocked && (
+                                <div className="absolute right-0 top-full mt-2 w-56 bg-gray-700 rounded-md shadow-lg z-20 border border-gray-600 overflow-hidden">
+                                    <ul className="py-1">
+                                        <li>
+                                            <button onClick={() => { handleAiRequest(runAiMusicVideoDirector); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors border-b border-gray-600/50">
+                                                <FilmIcon className="w-4 h-4 text-yellow-300" /> AI MV 導演模式
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button onClick={() => { handleAiRequest(runAiLyricTiming); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors border-b border-gray-600/50">
+                                                <SparklesIcon className="w-4 h-4 text-purple-400" /> AI 自動抓軌
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button onClick={() => { handleAiRequest(runAiImageGeneration); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors border-b border-gray-600/50">
+                                                <ImageIcon className="w-4 h-4 text-green-400" /> AI 生成圖片
+                                            </button>
+                                        </li>
+                                        <li>
+                                            <button onClick={() => { handleAiRequest(runAiVideoGeneration); setIsAiMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm text-gray-200 hover:bg-gray-600 flex items-center gap-2 transition-colors">
+                                                <VideoCameraIcon className="w-4 h-4 text-blue-400" /> AI 一般影片生成
+                                            </button>
+                                        </li>
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
                  {isAiUnlocked && !isKeySelected && <div className="text-xs text-center text-blue-300 bg-blue-900/50 p-2 rounded-md mb-2">AI 影片生成是 Beta 功能，需要您 <a href="#" onClick={(e) => { e.preventDefault(); window.aistudio.openSelectKey(); setIsKeySelected(true); }} className="font-bold underline">選擇 API 金鑰</a>。詳情請見 <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="underline">計費說明</a>。</div>}
