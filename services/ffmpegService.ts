@@ -9,8 +9,9 @@ async function loadFFmpeg() {
     if (ffmpeg && ffmpeg.isLoaded()) return ffmpeg;
     ffmpeg = createFFmpeg({
         log: true,
-        // Using jsdelivr CDN as an alternative to unpkg for better reliability
-        corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.0/dist/ffmpeg-core.js',
+        // Using version 0.10.1 single-threaded core to match the loader in index.html.
+        // This combination is stable and avoids the 'proxy_main' assertion error.
+        corePath: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.10.1/dist/ffmpeg-core.js',
     });
     await ffmpeg.load();
     return ffmpeg;
